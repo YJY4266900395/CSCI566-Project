@@ -1,0 +1,12 @@
+{
+  "normalize_unicode_nfkc": true,
+  "remove_control_chars": true,
+  "remove_emojis": false,
+  "remove_urls": true,
+  "remove_mentions": false,
+  "remove_hashtags": false,
+  "collapse_whitespace": true,
+  "strip": true,
+  "lowercase_latin": false,
+  "max_length": 0
+}
