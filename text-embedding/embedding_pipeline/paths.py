@@ -12,6 +12,13 @@ def _slug(s: str) -> str:
     return s or "unknown"
 
 
+def _dimension_slug(embedding_dim: int) -> str:
+    dim = int(embedding_dim)
+    if dim <= 0:
+        raise ValueError(f"embedding_dim must be > 0, got: {embedding_dim}")
+    return str(dim)
+
+
 def model_slug(model_name: str) -> str:
     raw = str(model_name or "").strip().rstrip("/\\")
     if not raw:
@@ -33,12 +40,14 @@ def default_embedding_output_path(
     output_root: str,
     model_name: str,
     input_path: str,
+    embedding_dim: int,
     extension: str = "parquet",
     dataset_name: str = "",
 ) -> str:
     ext = str(extension or "parquet").lstrip(".")
     ds = _slug(dataset_name) if dataset_name else dataset_slug(input_path)
-    return os.path.join(str(output_root), model_slug(model_name), "embeddings", f"{ds}.{ext}")
+    dim = _dimension_slug(embedding_dim)
+    return os.path.join(str(output_root), model_slug(model_name), "embeddings", dim, f"{ds}.{ext}")
 
 
 def infer_model_slug_from_embeddings_path(embeddings_path: str) -> str:

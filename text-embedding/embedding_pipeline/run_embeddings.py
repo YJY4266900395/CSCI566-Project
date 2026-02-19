@@ -8,7 +8,7 @@ from typing import Optional
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Local text embedding pipeline for video titles (BGE-M3).")
+    p = argparse.ArgumentParser(description="Text embedding pipeline for video titles.")
     p.add_argument(
         "--input",
         required=True,
@@ -17,7 +17,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--output",
         default="",
-        help="Output path (.parquet preferred; .npy also supported). If omitted, auto-uses output/models/<model>/embeddings/.",
+        help=(
+            "Output path (.parquet preferred; .npy also supported). "
+            "If omitted, auto-uses output/models/<model>/embeddings/<dimension>/"
+        ),
     )
     p.add_argument(
         "--output_format",
@@ -31,9 +34,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=["local", "openai"],
         help="Embedding backend: local (sentence-transformers) or openai (API).",
     )
-    p.add_argument("--model", default="BAAI/bge-m3", help="Local model path/name (must exist locally).")
+    p.add_argument("--model", default="", help="Local model repo id in org/repo format; required for --backend local.")
     p.add_argument("--openai_model", default="text-embedding-3-small", help="OpenAI embedding model name.")
-    p.add_argument("--dimensions", type=int, default=1024, help="OpenAI embedding dimensions (default: 1024).")
+    p.add_argument(
+        "--dimensions",
+        type=int,
+        default=None,
+        help=(
+            "Optional embedding dimensions override. "
+            "Local backend: default=model dim, values above model dim fall back to model dim. "
+            "OpenAI backend: default=1024 when omitted."
+        ),
+    )
     p.add_argument("--batch_size", type=int, default=128, help="Encoding batch size (default: 128).")
     p.add_argument(
         "--device",
@@ -66,7 +78,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         level=os.environ.get("LOGLEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    log = logging.getLogger("bge-m3")
+    log = logging.getLogger(__name__)
 
     t0 = time.time()
 
@@ -91,19 +103,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         log.info("Backend openai selected (device flag ignored).")
 
-    model_name_for_path = args.model if args.backend == "local" else args.openai_model
-    output_path = args.output or default_embedding_output_path(
-        output_root="output/models",
-        model_name=model_name_for_path,
-        input_path=args.input,
-        extension=args.output_format,
-    )
+    if args.backend == "local" and not str(args.model or "").strip():
+        raise SystemExit(
+            "ERROR: --model is required for --backend local and must be repo id (org/repo)."
+        )
 
     total_rows = count_rows(args.input, chunksize=args.chunksize)
     log.info("Input rows: %d", total_rows)
-    log.info("Output path: %s", output_path)
-
-    writer = make_writer(output_path, total_rows=total_rows)
 
     model = None
     openai_backend = None
@@ -113,19 +119,50 @@ def main(argv: Optional[list[str]] = None) -> int:
         from embedding_pipeline.encoder import encode_titles_with_fallback
 
         model = build_model(args.model, device=device)
-        embed_dim = int(model.get_sentence_embedding_dimension())
+        model_default_dim = int(model.get_sentence_embedding_dimension())
+        if args.dimensions is None:
+            embed_dim = model_default_dim
+            log.info("Using local default dimensions=%d", embed_dim)
+        else:
+            requested_dim = int(args.dimensions)
+            if requested_dim <= 0:
+                raise SystemExit("ERROR: --dimensions must be > 0 when provided.")
+            embed_dim = min(requested_dim, model_default_dim)
+            if requested_dim > model_default_dim:
+                log.warning(
+                    "Requested dimensions=%d exceeds model default=%d; using %d.",
+                    requested_dim,
+                    model_default_dim,
+                    embed_dim,
+                )
+            else:
+                log.info("Using local requested dimensions=%d (model default=%d)", embed_dim, model_default_dim)
     else:
         from embedding_pipeline.openai_backend import OpenAIEmbedder
 
+        openai_dimensions = 1024 if args.dimensions is None else int(args.dimensions)
+        if openai_dimensions <= 0:
+            raise SystemExit("ERROR: --dimensions must be > 0 when provided.")
         openai_backend = OpenAIEmbedder(
             model=args.openai_model,
-            dimensions=args.dimensions,
+            dimensions=openai_dimensions,
             request_batch_size=args.batch_size,
             max_retries=args.max_retries,
             normalize=args.normalize,
         )
         embed_dim = int(openai_backend.get_sentence_embedding_dimension())
 
+    model_name_for_path = args.model if args.backend == "local" else args.openai_model
+    output_path = args.output or default_embedding_output_path(
+        output_root="output/models",
+        model_name=model_name_for_path,
+        input_path=args.input,
+        embedding_dim=embed_dim,
+        extension=args.output_format,
+    )
+    log.info("Output path: %s", output_path)
+
+    writer = make_writer(output_path, total_rows=total_rows)
     writer_initialized = False
     written = 0
 

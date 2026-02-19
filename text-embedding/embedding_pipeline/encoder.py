@@ -22,6 +22,12 @@ def _non_empty_mask(texts: List[str]) -> List[bool]:
     return mask
 
 
+def _l2_normalize_rows(x: np.ndarray) -> np.ndarray:
+    denom = np.linalg.norm(x, axis=1, keepdims=True)
+    denom = np.where(denom == 0.0, 1.0, denom)
+    return x / denom
+
+
 def encode_titles(
     model: SentenceTransformer,
     texts: List[str],
@@ -51,6 +57,20 @@ def encode_titles(
         convert_to_numpy=True,
         normalize_embeddings=True,
     ).astype(np.float32, copy=False)
+
+    if emb_non_empty.ndim == 1:
+        emb_non_empty = emb_non_empty.reshape(1, -1)
+
+    source_dim = int(emb_non_empty.shape[1])
+    if source_dim < dim:
+        raise RuntimeError(
+            f"Model returned dimension={source_dim}, smaller than requested embedding_dim={dim}."
+        )
+
+    # If a smaller target dim is requested, truncate and re-normalize.
+    if source_dim > dim:
+        emb_non_empty = emb_non_empty[:, :dim]
+    emb_non_empty = _l2_normalize_rows(emb_non_empty)
 
     out = np.zeros((len(texts), dim), dtype=np.float32)
 

@@ -16,12 +16,13 @@ def test_model_slug_and_default_embedding_path() -> None:
         output_root="output/models",
         model_name="BAAI/bge-m3",
         input_path="/tmp/title_en.tsv",
+        embedding_dim=1024,
     )
-    assert out == "output/models/bge-m3/embeddings/title_en.parquet"
+    assert out == "output/models/bge-m3/embeddings/1024/title_en.parquet"
 
 
 def test_default_ann_index_output_dir_from_embeddings_path() -> None:
-    emb = "output/models/text-embedding-3-small/embeddings/title_en.parquet"
+    emb = "output/models/text-embedding-3-small/embeddings/1024/title_en.parquet"
     assert infer_model_slug_from_embeddings_path(emb) == "text-embedding-3-small"
     assert infer_dataset_slug_from_embeddings_path(emb) == "title_en"
 
