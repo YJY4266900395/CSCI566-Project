@@ -9,12 +9,12 @@ Text embedding pipeline for short-video metadata/text, with:
 
 ```text
 .
-├── main.py                          # CLI entrypoint for embedding jobs
-├── embedding_pipeline/              # Loaders, model backends, writers, ANN tools
-├── data_preprocessing/              # Data prep scripts
-├── data/                            # Local input/output data (gitignored)
-├── tests/                           # Smoke/unit tests
-└── tools/                           # Utilities (model download, ANN sampler)
+├── main.py                                  # CLI entrypoint for single-field embedding jobs
+├── embedding_pipeline/                      # Loaders, model backends, writers, ANN tools
+├── data_preprocessing/                      # Data prep scripts
+├── data/                                    # Local input/output data (gitignored)
+├── tests/                                   # Smoke/unit tests
+└── tools/                                   # Utilities (model download, ANN sampler)
 ```
 
 ## 1) Environment Setup
@@ -32,55 +32,66 @@ uv sync --locked
 
 After this, run commands with `uv run ...` (no manual activate needed).
 
-## 2) Data Processing
+## 2) Data Preprocessing
 
-### 2.1 Merge text files into TSV
+### 2.1 Recommended one-pass preprocessing (optimized)
 
-Merge `{video_id}.txt` files into one headerless TSV: `video_id<TAB>text`.
+Use one pass over `interaction_filtered.csv` to generate both multifield inputs:
+
+```bash
+uv run python data_preprocessing/build_multifield_tsvs.py \
+  --interaction-file data/interaction_filtered.csv \
+  --categories-file data/categories_cn_en.csv \
+  --video-tag-title-output data/video_tag_title.tsv \
+  --video-category-output data/video_category_combo_cn.tsv \
+  --category-name-col category_name_cn
+```
+
+Outputs (both are **headerless** TSV):
+- `data/video_tag_title.tsv`: `video_id<TAB>tag_name<TAB>title`
+- `data/video_category_combo_cn.tsv`: `video_id<TAB>category_combo_id<TAB>category_combo_name`
+
+This replaces two separate passes and is faster for large interaction files.
+
+### 2.2 Individual scripts (if needed)
+
+Generate `video_tag_title.tsv` only:
+
+```bash
+uv run python data_preprocessing/extract_video_tags_title_tsv.py \
+  --input data/interaction_filtered.csv \
+  --output data/video_tag_title.tsv
+```
+
+Generate `video_category_combo_cn.tsv` only:
+
+```bash
+uv run python data_preprocessing/generate_video_category_combo.py \
+  --interaction-file data/interaction_filtered.csv \
+  --categories-file data/categories_cn_en.csv \
+  --output-file data/video_category_combo_cn.tsv \
+  --name-col category_name_cn
+```
+
+Both outputs are headerless.
+
+### 2.3 Other data prep utilities
+
+Merge `{video_id}.txt` files into one headerless TSV (`video_id<TAB>text`):
 
 ```bash
 uv run python data_preprocessing/merge_to_tsv.py \
   --input_dir /path/to/title_en_txt
 ```
 
-Notes:
-- filenames are expected to be numeric video IDs (for numeric sort)
-- default output path is `<input_dir_name>.tsv` in the input dir's parent
-- optional: `--output /path/to/custom.tsv`
-- optional: `--limit N` to process only the first `N` files
-
-### 2.2 Generate category-combo TSV
-
-Produces a 2-column TSV:
-- column 1: `combo_id` (`cat1_cat2_cat3`)
-- column 2: `combo_name` (`cat1 > cat2 > cat3`)
-- only Level-3 paths are emitted (`root_id_parent_id_category_id`)
-- duplicate `combo_id` rows are deduplicated
+Generate category-combo dictionary (level-3 taxonomy):
 
 ```bash
 uv run python data_preprocessing/generate_category_combinations.py \
-  --input_file /path/to/categories_cn_en.csv \
-  --output_file /path/to/category_combo_en.tsv \
-  --name_col category_name_en
-```
-
-Chinese name output:
-
-```bash
-uv run python data_preprocessing/generate_category_combinations.py \
-  --input_file /path/to/categories_cn_en.csv \
-  --output_file /path/to/category_combo_cn.tsv \
+  --input_file data/categories_cn_en.csv \
+  --output_file data/category_combo_cn.tsv \
   --name_col category_name_cn
 ```
-
-### 2.3 Input formats supported by `main.py`
-
-- headered CSV with required `video_title` and optional `video_id`
-- headered TSV/TXT with the same column names
-- headerless TSV/TXT with exactly 2 columns: `id<TAB>text`
-- directory input where each `.txt` file is one row (ID from filename stem)
-
-Recommended for this pipeline: headerless `id<TAB>text` (for example `title_en.tsv`, `category_combo_cn.tsv`).
 
 ## 3) Download Model
 
@@ -90,14 +101,8 @@ Default cache root:
 - `~/.cache/huggingface/hub`
 - if `HF_HOME` is set: `$HF_HOME/hub`
 
-Snapshot layout example:
-- `~/.cache/huggingface/hub/models--<org>--<repo>/snapshots/<snapshot_id>/`
-
-Download commands:
-
 ```bash
-uv run python tools/download_hf_model.py --repo-id <org>/<repo>
-# example
+uv run python tools/download_hf_model.py --repo-id BAAI/bge-m3
 uv run python tools/download_hf_model.py --repo-id Qwen/Qwen3-Embedding-4B
 ```
 
@@ -108,112 +113,100 @@ export HF_TOKEN="..."
 uv run python tools/download_hf_model.py --repo-id <org>/<private-model>
 ```
 
-Model parameter rule for local backend:
-- `--model` must be repo id format: `org/repo` (for example `Qwen/Qwen3-Embedding-4B`)
-- pipeline resolves repo id to local snapshot: prefer `refs/main`, fallback to newest `snapshots/*` by mtime
-- `--dimensions` is optional for local backend
-- if `--dimensions` is omitted, use model default dimension
-- if `--dimensions` is provided, use `min(requested_dim, model_default_dim)`
-- if not found locally, run exits with a clear download hint
+Local backend model rule:
+- `--model` must be `org/repo`
+- pipeline resolves local snapshot by: `refs/main` first, else newest `snapshots/*`
+- if not found locally, run exits with a download hint
 
-## 4) Pipeline and Next Steps
+## 4) Embedding Pipelines
 
-### 4.1 Local embedding
+### 4.1 Single-field embedding (`main.py`)
 
 ```bash
-# model default dimension
 uv run python main.py \
-  --input data/title_en.tsv \
+  --input data/asr_cn.tsv \
   --backend local \
-  --model <org>/<repo> \
-  --batch_size 128
-
-# optional: request a smaller output dimension
-uv run python main.py \
-  --input data/title_en.tsv \
-  --backend local \
-  --model Qwen/Qwen3-Embedding-4B \
-  --dimensions 1024 \
-  --batch_size 128
+  --model BAAI/bge-m3 \
+  --dimensions 256 \
+  --batch_size 128 \
+  --device mps
 ```
 
-Writes to `output/models/<repo>/embeddings/<dimension>/title_en.parquet`.
+Default output path:
+- `output/models/<model>/embeddings/<dimension>/<dataset>.parquet`
 
-### 4.2 OpenAI embedding
+### 4.2 Multifield concat embedding (asr + title/tag + category)
+
+`embedding_pipeline.run_multifield_embeddings` uses 3 TSVs:
+- `asr`: `video_id<TAB>asr_text`
+- `title+tag`: `video_id<TAB>tag_name<TAB>title`
+- `category`: `video_id<TAB>category_combo_id<TAB>category_combo_name`
+
+Per-field embedding dim is `--dimensions` (default 256), then concatenated to `3 * dimensions` (default 768).
+Progress display is enabled by default and reports `rows/s` plus ETA per field.
 
 ```bash
-export OPENAI_API_KEY="..."
-uv run python main.py \
-  --input data/title_en.tsv \
-  --backend openai \
-  --openai_model text-embedding-3-small \
-  --dimensions 1024
+uv run python -m embedding_pipeline.run_multifield_embeddings \
+  --asr-input data/asr_cn.tsv \
+  --title-tag-input data/video_tag_title.tsv \
+  --category-input data/video_category_combo_cn.tsv \
+  --model BAAI/bge-m3 \
+  --dimensions 256 \
+  --batch-size 128 \
+  --max-seq-length 512 \
+  --device mps
 ```
 
-Writes to `output/models/text-embedding-3-small/embeddings/1024/title_en.parquet`.
+Output parquet columns:
+- `video_id`
+- `has_asr`, `has_title_tag`, `has_category` (0/1)
+- `embedding` (fixed size list, default 768)
 
-### 4.3 Build ANN index
+
+For `BAAI/bge-m3` on MPS, set `--max-seq-length 512` (or 1024) to avoid very large attention buffers at default seq length 8192.
+
+Optional: save each 256-dim field embedding as parquet too:
+
+```bash
+--save-field-embeddings
+```
+
+### 4.3 Local bge-m3 smoke test command
+
+```bash
+uv run python -m embedding_pipeline.run_multifield_embeddings \
+  --asr-input data/asr_cn.tsv \
+  --title-tag-input data/video_tag_title.tsv \
+  --category-input data/video_category_combo_cn.tsv \
+  --model BAAI/bge-m3 \
+  --dimensions 256 \
+  --batch-size 64 \
+  --max-seq-length 512 \
+  --device mps \
+  --max-videos 64 \
+  --output /tmp/video_multifield_concat.bgem3.sample.parquet
+```
+
+## 5) ANN (Optional)
+
+Build ANN index from any embedding parquet:
 
 ```bash
 uv run python -m embedding_pipeline.build_ann_index \
-  --input output/models/<model>/embeddings/<dimension>/title_en.parquet
+  --input output/models/<model>/embeddings/<dimension>/<dataset>.parquet
 ```
 
-### 4.4 Query ANN index
+Query ANN index:
 
 ```bash
 uv run python -m embedding_pipeline.query_ann_index \
-  --index-dir output/models/<model>/ann_index/title_en_index \
-  --embedding-parquet output/models/<model>/embeddings/<dimension>/title_en.parquet \
+  --index-dir output/models/<model>/ann_index/<dataset>_index \
+  --embedding-parquet output/models/<model>/embeddings/<dimension>/<dataset>.parquet \
   --embedding-index-id 0 \
   --topk 5
 ```
 
-### 4.5 ANN quality quick check (`tools/`)
-
-`tools/sample_ann_neighbors.py` supports:
-- `--mode video`: print `video_id`, score, and dataset URL
-- `--mode text`: print `video_id (video_title)` with score
-
-Video mode:
-
-```bash
-uv run python tools/sample_ann_neighbors.py \
-  --mode video \
-  --index-dir output/models/<model>/ann_index/title_en_index \
-  --embeddings-parquet output/models/<model>/embeddings/<dimension>/title_en.parquet \
-  --n 5 \
-  --k 10
-```
-
-Text mode:
-
-```bash
-uv run python tools/sample_ann_neighbors.py \
-  --mode text \
-  --index-dir output/models/<model>/ann_index/category_combo_cn_index \
-  --embeddings-parquet output/models/<model>/embeddings/<dimension>/category_combo_cn.parquet \
-  --n 5 \
-  --k 10
-```
-
-### 4.6 Output layout
-
-When outputs are omitted, artifacts are auto-organized as:
-- `output/models/<model>/embeddings/<dimension>/<dataset>.parquet` (or `.npy`)
-- `output/models/<model>/ann_index/<dataset>_index/`
-
-Examples:
-- `output/models/Qwen3-Embedding-4B/embeddings/1024/title_en.parquet`
-- `output/models/Qwen3-Embedding-4B/ann_index/title_en_index/`
-- `output/models/text-embedding-3-small/embeddings/1024/title_en.parquet`
-- `output/models/text-embedding-3-small/ann_index/title_en_index/`
-
-Output formats:
-- `.parquet` (recommended): includes `video_title`, `embedding`, optional `video_id`
-- `.npy`: dense matrix `(N, dim)` only (metadata not stored)
-
-### 4.7 Tests
+## 6) Tests
 
 ```bash
 uv run python tests/smoke_test.py
