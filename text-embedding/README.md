@@ -8,7 +8,8 @@ Text embedding pipeline for short-video metadata/text.
 # Install uv first if needed (macOS)
 brew install uv
 
-# Project is pinned to Python 3.12 (.python-version)
+# Project requires Python >=3.10 (pyproject.toml).
+# For this repo, .python-version uses 3.12.
 uv python install 3.12
 
 # Create/update .venv from pyproject.toml + uv.lock
@@ -80,12 +81,22 @@ Models are downloaded to Hugging Face cache:
 
 ```bash
 uv run python tools/download_hf_model.py --repo-id BAAI/bge-m3
+uv run python tools/download_hf_model.py --repo-id Qwen/Qwen3-Embedding-0.6B
 uv run python tools/download_hf_model.py --repo-id Qwen/Qwen3-Embedding-4B
+uv run python tools/download_hf_model.py --repo-id Qwen/Qwen3-Embedding-8B
+uv run python tools/download_hf_model.py --repo-id nvidia/llama-embed-nemotron-8b
 ```
 
 Local model rule:
 - pass `--model org/repo`
 - pipeline resolves local snapshot with `refs/main` first, then newest `snapshots/*`
+
+Currently available local models:
+- BAAI/bge-m3
+- `Qwen/Qwen3-Embedding-0.6B`
+- `Qwen/Qwen3-Embedding-4B`
+- `Qwen/Qwen3-Embedding-8B`
+- `nvidia/llama-embed-nemotron-8b`
 
 ## 5) Embedding Generation
 
