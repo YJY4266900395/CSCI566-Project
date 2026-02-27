@@ -94,3 +94,21 @@ def test_query_ann_index_handles_missing_video_id_column(tmp_path: Path) -> None
     assert len(results) == 1
     assert results[0]["video_id"] == ""
     assert results[0]["video_title"] == "only-title-1"
+
+
+def test_query_ann_index_clamps_topk_to_index_size(tmp_path: Path) -> None:
+    emb_path = tmp_path / "emb_clamp.parquet"
+    _write_embeddings_parquet(
+        emb_path,
+        np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        video_titles=["alpha", "beta"],
+        video_ids=["v1", "v2"],
+    )
+
+    index_dir = tmp_path / "ann_clamp"
+    build_ann_index_from_parquet(str(emb_path), str(index_dir), ef_search=32)
+
+    results = query_ann_index(str(index_dir), [1.0, 0.0], topk=10, ef_search=32)
+
+    assert len(results) == 2
+    assert {r["video_id"] for r in results} == {"v1", "v2"}

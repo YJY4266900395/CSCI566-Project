@@ -248,6 +248,12 @@ def query_ann_index(
     manifest_data = manifest or load_manifest(index_dir)
     dim = int(manifest_data["dimensions"])
     space = str(manifest_data["space"])
+    count = int(manifest_data.get("count", 0))
+    if count <= 0:
+        raise ValueError("Index is empty.")
+    if int(topk) <= 0:
+        raise ValueError("--topk must be > 0")
+    k = min(int(topk), count)
 
     vec = np.array(embedding, dtype=np.float32)
     if vec.ndim != 1 or int(vec.shape[0]) != dim:
@@ -257,7 +263,7 @@ def query_ann_index(
     index.load_index(os.path.join(index_dir, "index.bin"))
     index.set_ef(ef_search)
 
-    labels, distances = index.knn_query(vec, k=topk)
+    labels, distances = index.knn_query(vec, k=k)
     labels = labels[0].tolist()
     distances = distances[0].tolist()
 
