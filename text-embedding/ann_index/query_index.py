@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from .ann import load_manifest, query_ann_index, resolve_query_embedding, write_query_results
+from .core import load_manifest, query_ann_index, resolve_query_embedding, write_query_results
 
 
 def main() -> int:

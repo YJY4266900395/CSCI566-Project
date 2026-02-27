@@ -12,16 +12,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-try:
-    from .encoder import encode_titles_with_fallback
-    from .io import make_writer
-    from .model import build_model, resolve_device
-    from .paths import default_embedding_output_path
-except ImportError:  # pragma: no cover
-    from embedding_pipeline.encoder import encode_titles_with_fallback
-    from embedding_pipeline.io import make_writer
-    from embedding_pipeline.model import build_model, resolve_device
-    from embedding_pipeline.paths import default_embedding_output_path
+from .modeling import encode_texts_with_fallback
+from .io_utils import make_writer
+from .modeling import build_model, resolve_device
+from .io_utils import default_embedding_output_path
 
 
 WS_RE = re.compile(r"\s+")
@@ -359,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     field_outputs: dict[str, str] = {}
     for field_name, texts, field_idx in fields:
         log.info("Encoding field=%s rows=%d", field_name, n)
-        emb, model = encode_titles_with_fallback(
+        emb, model = encode_texts_with_fallback(
             model,
             texts,
             batch_size=int(args.batch_size),

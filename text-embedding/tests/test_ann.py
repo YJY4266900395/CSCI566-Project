@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("hnswlib")
 
-from embedding_pipeline.ann import (
+from ann_index.core import (
     build_ann_index_from_parquet,
     load_embedding_from_parquet,
     query_ann_index,

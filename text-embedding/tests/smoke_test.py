@@ -3,17 +3,15 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-import csv
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from embedding_pipeline.data import load_titles
-from embedding_pipeline.encoder import encode_titles
-from embedding_pipeline.io import make_writer
+from embedding_generator.modeling import encode_texts
+from embedding_generator.io_utils import make_writer
 
 
 @dataclass
@@ -51,7 +49,7 @@ def main() -> int:
     # 1) Encoder behavior: empty titles -> zero vectors; non-empty -> ~unit norm.
     model = DummyModel(dim=8)
     texts = ["你好", "", "   ", None, "世界"]
-    emb = encode_titles(model, texts, batch_size=4, embedding_dim=model.get_sentence_embedding_dimension())
+    emb = encode_texts(model, texts, batch_size=4, embedding_dim=model.get_sentence_embedding_dimension())
     assert emb.shape == (len(texts), model.dim)
     assert np.allclose(emb[1], 0.0)
     assert np.allclose(emb[2], 0.0)
@@ -59,45 +57,29 @@ def main() -> int:
     _assert_close(float(np.linalg.norm(emb[0])), 1.0)
     _assert_close(float(np.linalg.norm(emb[4])), 1.0)
 
-    # 2) I/O smoke test using a temp CSV + both writers (keeps repo clean).
+    # 2) I/O smoke test for writers using in-memory samples (keeps repo clean).
     with tempfile.TemporaryDirectory(prefix="bge_m3_smoke_") as td:
-        input_csv = os.path.join(td, "sample_video_titles.csv")
-        with open(input_csv, "w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["video_id", "video_title"])
-            w.writerow([1, "冬天穿搭推荐"])
-            w.writerow([2, "#搞笑 今日份快乐"])
-            w.writerow([3, "重庆火锅真的太香了！"])
-            w.writerow([4, ""])
-            w.writerow([5, "  "])
-            w.writerow([6, "萌宠日常 🐶"])
-
-        # Count rows quickly for this small test.
-        total_rows = sum(len(b["video_title"]) for b in load_titles(input_csv, chunksize=10_000))
-        assert total_rows > 0
+        samples = [
+            ("1", "冬天穿搭推荐"),
+            ("2", "#搞笑 今日份快乐"),
+            ("3", "重庆火锅真的太香了！"),
+            ("4", ""),
+            ("5", "  "),
+            ("6", "萌宠日常 🐶"),
+        ]
+        ids = [sid for sid, _ in samples]
+        titles = [txt for _, txt in samples]
+        total_rows = len(samples)
 
         out_parquet = os.path.join(td, "smoke.parquet")
         out_npy = os.path.join(td, "smoke.npy")
 
         for out_path in [out_parquet, out_npy]:
             writer = make_writer(out_path, total_rows=total_rows)
-            writer_initialized = False
-            written = 0
-
-            for batch in load_titles(input_csv, chunksize=4):
-                titles = batch["video_title"]
-                ids: Optional[List[object]] = batch.get("video_id")  # type: ignore[assignment]
-                emb = encode_titles(model, titles, batch_size=4, embedding_dim=model.get_sentence_embedding_dimension())
-
-                if not writer_initialized:
-                    writer.init_if_needed(embedding_dim=model.get_sentence_embedding_dimension(), has_ids=ids is not None)
-                    writer_initialized = True
-
-                writer.write_batch(video_titles=titles, embeddings=emb, video_ids=ids)
-                written += len(titles)
-
+            emb = encode_texts(model, titles, batch_size=4, embedding_dim=model.get_sentence_embedding_dimension())
+            writer.init_if_needed(embedding_dim=model.get_sentence_embedding_dimension(), has_ids=True)
+            writer.write_batch(video_titles=titles, embeddings=emb, video_ids=ids)
             writer.close()
-            assert written == total_rows
             assert os.path.exists(out_path)
 
         # 3) Validate Parquet output shape and schema lightly.

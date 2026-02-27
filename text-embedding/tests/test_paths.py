@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from embedding_pipeline.paths import (
+from embedding_generator.io_utils import (
     default_ann_index_output_dir,
     default_embedding_output_path,
     infer_dataset_slug_from_embeddings_path,

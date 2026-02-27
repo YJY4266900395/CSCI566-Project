@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import argparse
 
-from .ann import build_ann_index_from_parquet
-from .paths import (
+from .core import build_ann_index_from_parquet
+from .core import (
     default_ann_index_output_dir,
     infer_dataset_slug_from_embeddings_path,
     infer_model_slug_from_embeddings_path,
