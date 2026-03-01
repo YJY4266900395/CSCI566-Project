@@ -13,6 +13,9 @@ from sentence_transformers import SentenceTransformer
 
 log = logging.getLogger(__name__)
 _REPO_ID_RE = re.compile(r"^[^/]+/[^/]+$")
+_TRUST_REMOTE_CODE_ALLOWLIST = {
+    "nvidia/llama-embed-nemotron-8b",
+}
 
 
 def resolve_device(device_arg: str) -> str:
@@ -112,10 +115,23 @@ def _resolve_local_model_path(model_name: str) -> str:
     )
 
 
+def _should_trust_remote_code(model_name: str) -> bool:
+    return str(model_name or "").strip().lower() in _TRUST_REMOTE_CODE_ALLOWLIST
+
+
 def build_model(model_name: str, *, device: str) -> SentenceTransformer:
     """Load SentenceTransformer in strict local-only mode."""
     resolved_model_path = _resolve_local_model_path(model_name)
-    log.info("Loading model: %s -> %s (device=%s local-only=true)", model_name, resolved_model_path, device)
+    trust_remote_code = _should_trust_remote_code(model_name)
+    log.info(
+        "Loading model: %s -> %s (device=%s local-only=true trust_remote_code=%s)",
+        model_name,
+        resolved_model_path,
+        device,
+        trust_remote_code,
+    )
+    if trust_remote_code:
+        log.warning("trust_remote_code is enabled for allowlisted model: %s", model_name)
 
     try:
         with _hf_offline_mode(True):
@@ -123,15 +139,25 @@ def build_model(model_name: str, *, device: str) -> SentenceTransformer:
                 return SentenceTransformer(
                     resolved_model_path,
                     device=device,
+                    trust_remote_code=trust_remote_code,
                     model_kwargs={"local_files_only": True},
                     tokenizer_kwargs={"local_files_only": True},
                 )
             except TypeError:
                 try:
-                    return SentenceTransformer(resolved_model_path, device=device, local_files_only=True)
+                    return SentenceTransformer(
+                        resolved_model_path,
+                        device=device,
+                        trust_remote_code=trust_remote_code,
+                        local_files_only=True,
+                    )
                 except TypeError:
                     log.warning("local_files_only kwargs not supported; relying on offline mode env.")
-                    return SentenceTransformer(resolved_model_path, device=device)
+                    return SentenceTransformer(
+                        resolved_model_path,
+                        device=device,
+                        trust_remote_code=trust_remote_code,
+                    )
     except Exception as e:
         raise RuntimeError(
             f"Failed to load local model '{resolved_model_path}'. Ensure the model exists locally and is complete."
